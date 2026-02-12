@@ -16,20 +16,23 @@ def load_saved_data():
     embeddings = np.load("embeddings.npy")
     with open("chunks.pkl", "rb") as f:
         chunks = pickle.load(f)
-    embedder = SentenceTransformer("all-MiniLM-L6-v2")  # reload model fresh
+    embedder = SentenceTransformer("all-MiniLM-L6-v2")  # reload fresh
     return embedder, index, embeddings, chunks
 
 def answer_question(question, chunks, embedder, index, embeddings, top_k=5):
     q_embed = embedder.encode([question])
     D, I = index.search(np.array(q_embed), top_k)
-    context = "\n".join([chunks[i] for i in I[0]])
+    retrieved_chunks = [chunks[i] for i in I[0]]
+    context = "\n".join(retrieved_chunks)
 
     prompt = f"""You are a helpful assistant.
-Use the context below if it is relevant. 
-If the context is not sufficient, answer using your own knowledge.
+Here is the retrieved context from the PDF:
 
-Context:
 {context}
+
+Now answer the question below. 
+If the context is relevant, use it. 
+If not, answer using your own knowledge.
 
 Question:
 {question}
@@ -37,11 +40,10 @@ Question:
 
     response = gemini.generate_content(prompt)
 
-    # Ensure we always return something
     if hasattr(response, "text") and response.text:
-        return response.text
+        return response.text, retrieved_chunks
     else:
-        return "Sorry, I couldn’t generate an answer. Try rephrasing your question."
+        return "Sorry, I couldn’t generate an answer. Try rephrasing your question.", retrieved_chunks
 
 # ---- Streamlit UI ----
 st.title("📄 RAG App with Gemini + FAISS")
@@ -56,11 +58,5 @@ try:
         st.markdown("### Gemini says:")
         st.write(answer)
 
-        # Show retrieved context so you know what Gemini saw
         st.markdown("### Retrieved Context:")
         st.write("\n\n".join(retrieved_chunks))
-
-except Exception as e:
-    st.error(f"Could not load saved data: {e}")
-    st.info("Make sure index.faiss, embeddings.npy, and chunks.pkl are in your repo.")
-
