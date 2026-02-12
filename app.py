@@ -55,3 +55,4 @@ except Exception as e:
     st.info("Make sure index.faiss, embeddings.npy, and chunks.pkl are in your repo.")
 
 
+
