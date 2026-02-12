@@ -54,3 +54,4 @@ except Exception as e:
     st.error(f"Could not load saved data: {e}")
     st.info("Make sure index.faiss, embeddings.npy, and chunks.pkl are in your repo.")
 
+
