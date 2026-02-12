@@ -1,66 +1,88 @@
-import streamlit as st
-import pandas as pd
+import os
+import faiss
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.cluster import DBSCAN
-from sklearn.datasets import make_blobs
+import pickle
+import streamlit as st
+import pdfplumber
+from sentence_transformers import SentenceTransformer
+import google.generativeai as genai
 
-# Title and Description based on the sources
-st.title("DBSCAN Clustering Explorer")
-st.write("""
-This app visualizes how DBSCAN 'walks around' and finds groups based on density. 
-It identifies **Core Points**, **Border Points**, and **Noise** as it expands clusters [1].
-""")
+# ---- Gemini Setup ----
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+gemini = genai.GenerativeModel("gemini-2.5-flash")
 
-# Sidebar for Parameters (Source [1])
-st.sidebar.header("Parameters")
-eps = st.sidebar.slider("Maximum distance (eps ε)", 0.1, 2.0, 0.5, help="Radius around a point [2]")
-min_samples = st.sidebar.slider("Minimum points (min_samples)", 2, 20, 5, help="Points needed for a Core Point [1]")
+# ---- Helper Functions ----
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+    return text
 
-# Generate synthetic data for visualization
-X, _ = make_blobs(n_samples=300, centers=4, cluster_std=0.60, random_state=0)
+def chunk_text(text, max_length=500):
+    paragraphs = text.split('\n')
+    chunks, chunk = [], ""
+    for para in paragraphs:
+        if len(chunk) + len(para) < max_length:
+            chunk += " " + para
+        else:
+            chunks.append(chunk.strip())
+            chunk = para
+    chunks.append(chunk.strip())
+    return chunks
 
-# Run DBSCAN (External Library implementing logic from Source [3], [4])
-db = DBSCAN(eps=eps, min_samples=min_samples).fit(X)
-labels = db.labels_
+def embed_chunks(chunks):
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    embeddings = model.encode(chunks)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(np.array(embeddings))
+    return model, index, embeddings
 
-# Identify point types (Source [1], [3])
-# Core points are those found by the algorithm to meet the density criteria
-core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
-core_samples_mask[db.core_sample_indices_] = True
+def answer_question(question, chunks, embedder, index, embeddings, top_k=5):
+    q_embed = embedder.encode([question])
+    D, I = index.search(np.array(q_embed), top_k)
+    context = "\n".join([chunks[i] for i in I[0]])
+    prompt = f"""Answer the question based on the below context:
 
-# Visualization
-fig, ax = plt.subplots(figsize=(10, 6))
+Context:
+{context}
 
-# Define colors for different clusters
-unique_labels = set(labels)
-colors = [plt.cm.Spectral(each) for each in np.linspace(0, 1, len(unique_labels))]
+Question:
+{question}
+"""
+    response = gemini.generate_content(prompt)
+    return response.text
 
-for k, col in zip(unique_labels, colors):
-    if k == -1:
-        # Black used for Noise Points [1]
-        col = [1]
+# ---- Streamlit UI ----
+st.title("📄 RAG App with Gemini + FAISS")
 
-    class_member_mask = (labels == k)
+uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
+if uploaded_file is not None:
+    pdf_path = uploaded_file.name
+    with open(pdf_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    st.success("PDF uploaded successfully!")
 
-    # Plot Core Points (Large dots) [3]
-    xy = X[class_member_mask & core_samples_mask]
-    ax.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
-             markeredgecolor='k', markersize=10, label=f'Cluster {k} Core' if k != -1 else 'Noise')
+    # Extract and chunk
+    text = extract_text_from_pdf(pdf_path)
+    chunks = chunk_text(text)
 
-    # Plot Border Points (Smaller dots) [1], [4]
-    xy = X[class_member_mask & ~core_samples_mask]
-    ax.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
-             markeredgecolor='k', markersize=5)
+    # Embed and index
+    embedder, index, embeddings = embed_chunks(chunks)
 
-ax.set_title(f'Estimated number of clusters: {len(unique_labels) - (1 if -1 in labels else 0)}')
-st.pyplot(fig)
+    # Save FAISS + embeddings + chunks (small files, not the big model)
+    faiss.write_index(index, "index.faiss")
+    np.save("embeddings.npy", embeddings)
+    with open("chunks.pkl", "wb") as f:
+        pickle.dump(chunks, f)
 
-# Explanation of what is happening (Source [1], [2])
-st.info(f"""
-**How it works:**
-1. The app places a circle of radius **{eps} (eps)** around each point [2].
-2. If a circle contains **{min_samples} (min_samples)** or more points, it becomes a **Core Point** [1], [3].
-3. The cluster expands by adding all **directly density-reachable** points (those within the circle) [4].
-4. Points that are neither core nor border are marked as **Noise** (black dots) [1].
-""")
+    st.info("Embeddings created and FAISS index built.")
+
+    # Question input
+    question = st.text_input("Ask a question about the PDF:")
+    if question:
+        answer = answer_question(question, chunks, embedder, index, embeddings)
+        st.markdown("### Gemini says:")
+        st.write(answer)
