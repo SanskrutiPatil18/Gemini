@@ -24,6 +24,7 @@ def answer_question(question, chunks, embedder, index, embeddings, top_k=5):
     D, I = index.search(np.array(q_embed), top_k)
     context = "\n".join([chunks[i] for i in I[0]])
 
+    # Improved prompt: allows fallback if context is weak
     prompt = f"""You are a helpful assistant.
 Use the context below if it is relevant. 
 If the context is not sufficient, answer using your own knowledge.
@@ -43,7 +44,7 @@ st.title("📄 RAG App with Gemini + FAISS")
 try:
     embedder, index, embeddings, chunks = load_saved_data()
     st.success("Index, embeddings, and chunks loaded successfully!")
-    
+
     question = st.text_input("Ask a question about the PDF:")
     if question:
         answer = answer_question(question, chunks, embedder, index, embeddings)
@@ -53,7 +54,3 @@ try:
 except Exception as e:
     st.error(f"Could not load saved data: {e}")
     st.info("Make sure index.faiss, embeddings.npy, and chunks.pkl are in your repo.")
-
-
-
-
