@@ -3,3 +3,7 @@ numpy
 pandas
 scikit-learn
 matplotlib
+google-generativeai
+pymupdf
+sentence-transformers
+faiss-cpu
