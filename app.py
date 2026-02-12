@@ -23,7 +23,10 @@ def answer_question(question, chunks, embedder, index, embeddings, top_k=5):
     q_embed = embedder.encode([question])
     D, I = index.search(np.array(q_embed), top_k)
     context = "\n".join([chunks[i] for i in I[0]])
-    prompt = f"""Answer the question based on the below context:
+
+    prompt = f"""You are a helpful assistant.
+If the context below is relevant, use it. 
+If not, answer the question using your own knowledge.
 
 Context:
 {context}
@@ -50,3 +53,4 @@ try:
 except Exception as e:
     st.error(f"Could not load saved data: {e}")
     st.info("Make sure index.faiss, embeddings.npy, and chunks.pkl are in your repo.")
+
