@@ -7,3 +7,4 @@ google-generativeai
 pymupdf
 sentence-transformers
 faiss-cpu
+pymupdf
