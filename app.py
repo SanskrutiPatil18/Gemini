@@ -22,21 +22,24 @@ def load_saved_data():
 def answer_question(question, chunks, embedder, index, embeddings, top_k=5):
     q_embed = embedder.encode([question])
     D, I = index.search(np.array(q_embed), top_k)
-    context = "\n".join([chunks[i] for i in I[0]])
+    retrieved_chunks = [chunks[i] for i in I[0]]
+    context = "\n".join(retrieved_chunks)
 
-    # Improved prompt: allows fallback if context is weak
+    # Improved prompt: always show context, allow fallback
     prompt = f"""You are a helpful assistant.
-Use the context below if it is relevant. 
-If the context is not sufficient, answer using your own knowledge.
+Here is the retrieved context from the PDF:
 
-Context:
 {context}
+
+Now answer the question below. 
+If the context is relevant, use it. 
+If not, answer using your own knowledge.
 
 Question:
 {question}
 """
     response = gemini.generate_content(prompt)
-    return response.text
+    return response.text, retrieved_chunks
 
 # ---- Streamlit UI ----
 st.title("📄 RAG App with Gemini + FAISS")
@@ -47,9 +50,13 @@ try:
 
     question = st.text_input("Ask a question about the PDF:")
     if question:
-        answer = answer_question(question, chunks, embedder, index, embeddings)
+        answer, retrieved_chunks = answer_question(question, chunks, embedder, index, embeddings)
         st.markdown("### Gemini says:")
         st.write(answer)
+
+        # Show retrieved context so you know what Gemini saw
+        st.markdown("### Retrieved Context:")
+        st.write("\n\n".join(retrieved_chunks))
 
 except Exception as e:
     st.error(f"Could not load saved data: {e}")
